@@ -140,7 +140,7 @@ class BrowserSession:
                     break
 
                 target_link = random.choice(valid_links[:15])  # Chọn ngẫu nhiên trong 15 link đầu
-                logger.info(f"[{self.worker_id}] Duyệt trang con {i+1}/{max_pages}: {target_link.link[:50]}...", self.worker_id)
+                logger.info(f"Duyệt trang con {i+1}/{max_pages}: {target_link.link[:50]}...", self.worker_id)
                 
                 # Cuộn đến phần tử link trước khi bấm
                 try:
@@ -151,11 +151,11 @@ class BrowserSession:
                     # Nếu click element bị che, dùng JavaScript click
                     self.page.run_js("arguments[0].click();", target_link)
 
-                self.page.wait.load_start()
+                human_sleep(2.0, 3.5, stop_event)
                 # Cuộn đọc trên trang con
                 self.human_scroll(dwell_time_per_page, stop_event)
             except Exception as e:
-                logger.warning(f"[{self.worker_id}] Không thể duyệt tiếp trang con: {e}", self.worker_id)
+                logger.warning(f"Không thể duyệt tiếp trang con: {e}", self.worker_id)
                 break
 
     def close(self):

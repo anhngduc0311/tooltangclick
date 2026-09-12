@@ -42,7 +42,7 @@ def run_direct_bot_task(
 
     try:
         ref_text = f" từ {referral_source}" if referral_source and referral_source != "Direct" else ""
-        logger.info(f"[{worker_id}] Bắt đầu truy cập{ref_text} vào: {target_url}", worker_id)
+        logger.info(f"Bắt đầu truy cập{ref_text} vào: {target_url}", worker_id)
         page = session.start()
 
         if stop_event and stop_event.is_set():
@@ -58,11 +58,10 @@ def run_direct_bot_task(
                 pass
 
         page.get(target_url)
-        page.wait.load_start()
-        human_sleep(2.0, 3.5, stop_event)
+        human_sleep(1.5, 3.0, stop_event)
 
         dwell_seconds = random.uniform(dwell_time_range[0], dwell_time_range[1])
-        logger.info(f"[{worker_id}] Đang lướt đọc trang trong {int(dwell_seconds)} giây...", worker_id)
+        logger.info(f"Đang lướt đọc trang trong {int(dwell_seconds)} giây...", worker_id)
         session.human_scroll(dwell_seconds, stop_event)
 
         if internal_pages_count > 0 and not (stop_event and stop_event.is_set()):
@@ -75,10 +74,10 @@ def run_direct_bot_task(
 
         result_data["success"] = True
         result_data["message"] = f"Hoàn thành truy cập{ref_text}"
-        logger.success(f"[{worker_id}] Hoàn thành phiên truy cập trực tiếp.", worker_id)
+        logger.success("Hoàn thành phiên truy cập trực tiếp.", worker_id)
 
     except Exception as e:
-        logger.error(f"[{worker_id}] Lỗi truy cập trực tiếp: {e}", worker_id)
+        logger.error(f"Lỗi truy cập trực tiếp: {e}", worker_id)
         result_data["message"] = str(e)
     finally:
         session.close()
