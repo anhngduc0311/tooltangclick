@@ -112,6 +112,16 @@ class TaskManager:
             proxy = self.proxy_manager.get_proxy()
             if proxy:
                 logger.info(f"[{worker_id}] Sử dụng Proxy: {proxy.host}:{proxy.port}", worker_id)
+            else:
+                has_proxy_cfg = bool(config.get("proxy_api_url") or config.get("proxies"))
+                if has_proxy_cfg:
+                    logger.warning(f"[{worker_id}] Chưa lấy được Proxy, đang chờ để lấy IP mới...", worker_id)
+                    time.sleep(5)
+                    proxy = self.proxy_manager.get_proxy()
+                    if not proxy:
+                        logger.error(f"[{worker_id}] Chưa có Proxy khả dụng! Tạm nghỉ 10s để tránh làm lộ IP mạng nhà.", worker_id)
+                        time.sleep(10)
+                        continue
 
             session = BrowserSession(
                 headless=headless,

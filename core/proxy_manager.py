@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import time
 import tempfile
 import zipfile
@@ -7,6 +8,8 @@ import threading
 import requests
 from typing import Optional, Dict, List, Tuple
 from utils.logger import logger
+
+CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".proxy_cache.json")
 
 class ProxyItem:
     def __init__(self, raw: str):
@@ -87,6 +90,33 @@ class ProxyManager:
         self._temp_ext_dirs: List[str] = []
         self._last_api_proxy: Optional[ProxyItem] = None
         self._last_fetch_time: float = 0
+        self._load_cache()
+
+    def _save_cache(self, proxy_item: ProxyItem):
+        try:
+            data = {
+                "raw": proxy_item.raw,
+                "timestamp": time.time()
+            }
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except Exception:
+            pass
+
+    def _load_cache(self):
+        try:
+            if os.path.exists(CACHE_FILE):
+                with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                t = data.get("timestamp", 0)
+                if time.time() - t < 1200:
+                    raw = data.get("raw")
+                    if raw:
+                        self._last_api_proxy = ProxyItem(raw)
+                        self._last_fetch_time = t
+                        logger.info(f"[Proxy] Đã nạp proxy từ bộ nhớ đệm: {self._last_api_proxy.host}:{self._last_api_proxy.port}", "Proxy")
+        except Exception:
+            pass
 
     def set_proxies_from_text(self, text: str):
         """Nạp danh sách proxy từ chuỗi nhiều dòng"""
@@ -152,6 +182,7 @@ class ProxyManager:
                                 with self._lock:
                                     self._last_api_proxy = item
                                     self._last_fetch_time = time.time()
+                                self._save_cache(item)
                                 msg = js.get("message", "")
                                 loc = js.get("Vi Tri", "")
                                 logger.info(f"[Proxy.vn] Đổi IP thành công: {item.host}:{item.port} ({loc}) - {msg}", "Proxy")
@@ -164,6 +195,14 @@ class ProxyManager:
                                 if self._last_api_proxy and (time.time() - self._last_fetch_time < 1200):
                                     logger.info(f"[Proxy.vn] Tiếp tục sử dụng proxy hiện tại: {self._last_api_proxy.host}:{self._last_api_proxy.port}", "Proxy")
                                     return self._last_api_proxy
+
+                            # Nếu chưa có proxy cũ và cần chờ, tự động chờ nếu <= 60s
+                            wait_m = re.search(r'(\d+)\s*s', err_msg)
+                            wait_sec = int(wait_m.group(1)) if wait_m else 0
+                            if 0 < wait_sec <= 60:
+                                logger.info(f"[Proxy.vn] Đang chờ {wait_sec + 1}s để đổi IP mới...", "Proxy")
+                                time.sleep(wait_sec + 1)
+                                return self._fetch_proxy_from_api(api_url)
 
                     # 2. TMProxy: {"code": 0, "data": {"https": "ip:port"}}
                     if "data" in js and isinstance(js["data"], dict) and "https" in js["data"]:
@@ -221,6 +260,11 @@ class ProxyManager:
                             msg = js.get("message", "")
                             location = js.get("Vi Tri", "")
                             isp = js.get("Nha Mang", "")
+                            try:
+                                with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                                    json.dump({"raw": proxy_http, "timestamp": time.time()}, f)
+                            except Exception:
+                                pass
                             return {
                                 "success": True,
                                 "proxy": proxy_http,
@@ -229,11 +273,20 @@ class ProxyManager:
                             }
                         else:
                             err_msg = js.get("message") or js.get("comen") or f"Lỗi status={js.get('status')}"
+                            cached_info = ""
+                            try:
+                                if os.path.exists(CACHE_FILE):
+                                    with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                                        cd = json.load(f)
+                                    if time.time() - cd.get("timestamp", 0) < 1200:
+                                        cached_info = f" (Proxy đang dùng: {cd.get('raw')})"
+                            except Exception:
+                                pass
                             return {
-                                "success": False,
+                                "success": bool(cached_info),
                                 "proxy": None,
                                 "latency_ms": latency,
-                                "detail": f"[Proxy.vn Lỗi]: {err_msg}"
+                                "detail": f"[Proxy.vn]: {err_msg}{cached_info}"
                             }
                     # Các loại API khác
                     return {

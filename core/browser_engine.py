@@ -39,13 +39,15 @@ class BrowserSession:
     def start(self) -> ChromiumPage:
         """Khởi tạo trình duyệt Chromium với đầy đủ cấu hình chống bot và proxy"""
         co = ChromiumOptions()
-        # Cấp phát cổng CDP riêng cho từng luồng
-        port = find_free_port()
-        co.set_local_port(port)
+        # Cấp phát cổng và giữ profile bền vững để duy trì cookie/trust của Google
+        worker_num = 1
+        try:
+            worker_num = int(self.worker_id.split("-")[-1])
+        except Exception:
+            pass
 
-        # Tạo thư mục profile tạm thời độc lập cho luồng này
-        self._temp_profile_dir = tempfile.mkdtemp(prefix=f"dp_profile_{self.worker_id}_")
-        co.set_user_data_path(self._temp_profile_dir)
+        if worker_num > 1:
+            co.set_local_port(9221 + worker_num)
 
         # Chế độ ẩn/hiện cửa sổ
         if self.headless:
@@ -64,8 +66,8 @@ class BrowserSession:
         co.set_argument("--mute-audio")
         co.set_argument("--disable-notifications")
         co.set_argument("--disable-popup-blocking")
-        co.set_argument("--disable-blink-features=AutomationControlled")
         co.set_argument("--disable-infobars")
+        co.set_argument("--disable-search-engine-choice-screen")
         co.set_argument("--lang=vi-VN,vi,en-US,en")
 
         # Cấu hình Proxy
@@ -167,13 +169,6 @@ class BrowserSession:
             pass
         finally:
             self.page = None
-
-        # Dọn dẹp thư mục profile tạm thời
-        if self._temp_profile_dir and os.path.exists(self._temp_profile_dir):
-            try:
-                shutil.rmtree(self._temp_profile_dir, ignore_errors=True)
-            except Exception:
-                pass
 
         # Dọn dẹp extension proxy tạm thời
         if self._ext_dir and os.path.exists(self._ext_dir):

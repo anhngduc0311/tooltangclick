@@ -594,6 +594,17 @@ class MainWindow(ctk.CTk):
         else:
             self.chk_fallback.deselect()
 
+        dev_mode = cfg.get("device_mode", "desktop")
+        if dev_mode == "mobile":
+            self.combo_device.set("Mobile (Điện thoại)")
+        elif dev_mode == "mixed":
+            self.combo_device.set("Ngẫu nhiên (Mixed)")
+        else:
+            self.combo_device.set("Desktop (Máy tính)")
+
+        if cfg.get("google_domain"):
+            self.combo_google_domain.set(cfg.get("google_domain"))
+
         self.txt_proxies.delete("1.0", "end")
         self.txt_proxies.insert("1.0", cfg.get("proxies", ""))
 

@@ -1,6 +1,8 @@
 import time
 import random
+import urllib.parse
 from typing import Tuple, Dict, Any
+from DrissionPage.common import Keys
 from core.browser_engine import BrowserSession
 from utils.helpers import extract_domain, domain_matches, human_sleep
 from utils.logger import logger
@@ -60,41 +62,17 @@ def run_seo_bot_task(
         if stop_event and stop_event.is_set():
             return result_data
 
-        # 1. Truy cập trang chủ Google (page.get đã tự chờ trang tải)
-        logger.info(f"Đang mở Google ({google_domain})...", worker_id)
-        page.get(google_domain)
+        # 1. Tìm kiếm Google (chuẩn hóa Omnibox URL để mô phỏng tìm kiếm từ thanh địa chỉ trình duyệt, bỏ qua bẫy telemetry gws-wiz)
+        encoded_kw = urllib.parse.quote_plus(keyword)
+        search_url = f"{google_domain}/search?q={encoded_kw}&hl=vi"
+        logger.info(f"Đang tìm kiếm Google cho từ khóa: '{keyword}'...", worker_id)
+        page.get(search_url)
         handle_google_consent(page)
-        human_sleep(0.5, 1.5, stop_event)
-
-        # 2. Tìm ô tìm kiếm
-        search_box = page.ele("tag:textarea@@name=q", timeout=3) or page.ele("tag:input@@name=q", timeout=3)
-        if not search_box:
-            # Kiểm tra xem có bị captcha không
-            if "sorry" in page.url or page.ele("tag:form@@action=CaptchaRedirect", timeout=0.5):
-                logger.warning("Google yêu cầu xác minh Captcha. Vui lòng đổi Proxy!", worker_id)
-                result_data["message"] = "Bị Google Captcha"
-                return result_data
-            raise Exception("Không tìm thấy ô nhập tìm kiếm trên Google")
-
-        # 3. Gõ từ khóa tự nhiên
-        logger.info(f"Đang gõ từ khóa: '{keyword}'...", worker_id)
-        try:
-            search_box.click()
-            human_sleep(0.3, 0.7, stop_event)
-        except Exception:
-            pass
-        search_box.clear()
-        session.human_type(search_box, keyword, stop_event)
-        human_sleep(0.5, 1.2, stop_event)
-
-        # 4. Gửi tìm kiếm (nhấn Enter)
-        logger.info(f"Đang gửi truy vấn tìm kiếm...", worker_id)
-        search_box.input("\n")
         human_sleep(2.0, 3.5, stop_event)
 
         # Kiểm tra nếu bị redirect sorry
         if "sorry" in page.url:
-            logger.warning("Google phát hiện IP gửi nhiều truy vấn. Nên cấu hình Proxy sạch!", worker_id)
+            logger.warning("Google phát hiện IP này gửi nhiều truy vấn và hiển thị Captcha.", worker_id)
             if fallback_direct:
                 logger.info(f"Kích hoạt chế độ dự phòng: Truy cập trực tiếp {target_domain}...", worker_id)
                 target_url = target_domain if target_domain.startswith("http") else f"https://{target_domain}"
@@ -110,7 +88,7 @@ def run_seo_bot_task(
                         stop_event=stop_event
                     )
                 result_data["success"] = True
-                result_data["message"] = "Đã hoàn thành qua Direct Fallback"
+                result_data["message"] = "Đã hoàn thành qua Direct Fallback (Do IP gặp Captcha)"
                 logger.success("Hoàn thành phiên duyệt qua Fallback.", worker_id)
                 return result_data
             else:
@@ -147,12 +125,12 @@ def run_seo_bot_task(
                     overall_rank += 1
 
                     # Kiểm tra domain mục tiêu có nằm trong link, thẻ cite, hoặc nội dung block kết quả
-                    container = a_tag.parent()
-                    container_text = container.text.lower() if container else ""
+                    div_block = a_tag.parent("tag:div") or a_tag.parent()
+                    block_text = (div_block.text or "").lower() if div_block else ""
                     href = (a_tag.attr("href") or "").lower()
 
                     is_match = (
-                        clean_target in container_text or
+                        clean_target in block_text or
                         clean_target in href or
                         domain_matches(clean_target, href)
                     )
@@ -216,8 +194,8 @@ def run_seo_bot_task(
             human_sleep(2.0, 4.0, stop_event)
 
             # Nếu mở sang tab mới, chuyển điều khiển sang tab đó
-            if len(page.tabs) > 1:
-                page = page.get_tab(page.tabs[-1])
+            if len(page.tab_ids) > 1:
+                page = page.get_tab(page.tab_ids[-1])
                 session.page = page
 
             # Thời gian lưu lại trên trang (Dwell time)
