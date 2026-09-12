@@ -1,0 +1,22 @@
+{
+  "target_domain": "https://nekohentai.lol/",
+  "mode": "SEO Google CTR",
+  "referral_source": "Facebook",
+  "keywords": [
+    "dịch vụ seo uy tín",
+    "thiết kế web chuyên nghiệp",
+    "tin tức công nghệ mới"
+  ],
+  "dwell_min": 5,
+  "dwell_max": 10,
+  "internal_pages": 2,
+  "max_search_pages": 5,
+  "threads_count": 1,
+  "total_runs": 20,
+  "headless": false,
+  "device_mode": "desktop",
+  "fallback_direct": true,
+  "google_domain": "https://www.google.com",
+  "proxies": "",
+  "proxy_api_url": ""
+}
