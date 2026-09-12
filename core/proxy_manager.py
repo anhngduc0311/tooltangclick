@@ -1,10 +1,12 @@
 import os
 import re
+import time
 import tempfile
 import zipfile
 import threading
 import requests
 from typing import Optional, Dict, List, Tuple
+from utils.logger import logger
 
 class ProxyItem:
     def __init__(self, raw: str):
@@ -29,6 +31,10 @@ class ProxyItem:
             self.scheme = "socks5"
             text = text[9:]
 
+        # Xử lý trường hợp proxy trả về có 2 dấu hai chấm ở đuôi như Proxy.vn (ví dụ: 42.117.243.215:10836::)
+        if text.endswith("::"):
+            text = text[:-2]
+
         # Dạng user:pass@host:port
         if "@" in text:
             auth_part, host_part = text.split("@", 1)
@@ -50,8 +56,8 @@ class ProxyItem:
             elif len(parts) == 4:
                 self.host = parts[0]
                 self.port = int(parts[1])
-                self.username = parts[2]
-                self.password = parts[3]
+                self.username = parts[2] if parts[2].strip() else None
+                self.password = parts[3] if parts[3].strip() else None
             else:
                 self.host = parts[0]
                 self.port = int(parts[1])
@@ -79,6 +85,8 @@ class ProxyManager:
         self._index: int = 0
         self._lock = threading.Lock()
         self._temp_ext_dirs: List[str] = []
+        self._last_api_proxy: Optional[ProxyItem] = None
+        self._last_fetch_time: float = 0
 
     def set_proxies_from_text(self, text: str):
         """Nạp danh sách proxy từ chuỗi nhiều dòng"""
@@ -113,30 +121,147 @@ class ProxyManager:
             return proxy
 
     def _fetch_proxy_from_api(self, api_url: str) -> Optional[ProxyItem]:
-        """Gọi API dịch vụ xoay IP (TMProxy, Tinsoft, v.v...) để lấy IP mới"""
+        """
+        Hỗ trợ các nhà cung cấp API Proxy:
+        - Proxy.vn / Proxyxoay.shop: {"status": 100, "proxyhttp": "ip:port::", "message": "...", ...}
+        - TMProxy: {"code": 0, "data": {"https": "ip:port"}}
+        - Tinsoft: {"success": true, "proxy": "ip:port"}
+        - Plain text: IP:PORT
+        """
+        url = api_url.strip()
+        # Nếu người dùng chỉ nhập Key của Proxy.vn (không có http)
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = f"https://proxyxoay.shop/api/get.php?key={url}&nhamang=Random&tinhthanh=0"
+
         try:
-            resp = requests.get(api_url, timeout=10)
+            resp = requests.get(url, timeout=10)
             if resp.status_code == 200:
                 data = resp.text.strip()
-                # Nếu API trả về JSON
                 try:
                     js = resp.json()
-                    # Trường hợp TMProxy: {"code": 0, "data": {"https": "ip:port"}}
+                    
+                    # 1. Định dạng Proxy.vn / Proxyxoay.shop
+                    if "status" in js:
+                        st = js.get("status")
+                        if st == 100:
+                            proxy_str = js.get("proxyhttp") or js.get("proxysocks5")
+                            if proxy_str:
+                                raw_clean = proxy_str.rstrip(":")
+                                prefix = "socks5://" if "proxysocks5" in js and not js.get("proxyhttp") else ""
+                                item = ProxyItem(f"{prefix}{raw_clean}")
+                                with self._lock:
+                                    self._last_api_proxy = item
+                                    self._last_fetch_time = time.time()
+                                msg = js.get("message", "")
+                                loc = js.get("Vi Tri", "")
+                                logger.info(f"[Proxy.vn] Đổi IP thành công: {item.host}:{item.port} ({loc}) - {msg}", "Proxy")
+                                return item
+                        elif st in [101, 102]:
+                            err_msg = js.get("message") or js.get("comen") or f"Mã trạng thái {st}"
+                            logger.warning(f"[Proxy.vn] Phản hồi API: {err_msg}", "Proxy")
+                            # Nếu proxy cũ trước đó vẫn còn hiệu lực trong vòng 20 phút thì dùng lại
+                            with self._lock:
+                                if self._last_api_proxy and (time.time() - self._last_fetch_time < 1200):
+                                    logger.info(f"[Proxy.vn] Tiếp tục sử dụng proxy hiện tại: {self._last_api_proxy.host}:{self._last_api_proxy.port}", "Proxy")
+                                    return self._last_api_proxy
+
+                    # 2. TMProxy: {"code": 0, "data": {"https": "ip:port"}}
                     if "data" in js and isinstance(js["data"], dict) and "https" in js["data"]:
-                        return ProxyItem(js["data"]["https"])
-                    # Trường hợp Tinsoft: {"success": true, "proxy": "ip:port"}
+                        item = ProxyItem(js["data"]["https"])
+                        with self._lock:
+                            self._last_api_proxy = item
+                        return item
+
+                    # 3. Tinsoft: {"success": true, "proxy": "ip:port"}
                     if "proxy" in js and js["proxy"]:
-                        return ProxyItem(js["proxy"])
+                        item = ProxyItem(js["proxy"])
+                        with self._lock:
+                            self._last_api_proxy = item
+                        return item
+
                 except Exception:
                     pass
-                
-                # Kiểm tra IP:PORT dạng text thông thường
+
+                # 4. Kiểm tra chuỗi IP:PORT thông thường
                 match = re.search(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b', data)
                 if match:
-                    return ProxyItem(match.group(0))
-        except Exception:
-            pass
-        return None
+                    item = ProxyItem(match.group(0))
+                    with self._lock:
+                        self._last_api_proxy = item
+                    return item
+
+        except Exception as e:
+            logger.error(f"Lỗi khi kết nối API xoay proxy: {e}", "Proxy")
+
+        with self._lock:
+            return self._last_api_proxy
+
+    @staticmethod
+    def test_api_xoay(api_url_or_key: str) -> Dict:
+        """Kiểm tra gọi API xoay Proxy.vn / TMProxy trực tiếp và trả về chi tiết"""
+        url = api_url_or_key.strip()
+        if not url:
+            return {"success": False, "message": "Chưa nhập URL hoặc Key API"}
+
+        # Nếu chỉ có key xoay của Proxy.vn
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = f"https://proxyxoay.shop/api/get.php?key={url}&nhamang=Random&tinhthanh=0"
+
+        try:
+            start = time.time()
+            resp = requests.get(url, timeout=10)
+            latency = int((time.time() - start) * 1000)
+            if resp.status_code == 200:
+                try:
+                    js = resp.json()
+                    # Trường hợp Proxy.vn
+                    if "status" in js:
+                        if js.get("status") == 100:
+                            proxy_http = (js.get("proxyhttp") or "").rstrip(":")
+                            msg = js.get("message", "")
+                            location = js.get("Vi Tri", "")
+                            isp = js.get("Nha Mang", "")
+                            return {
+                                "success": True,
+                                "proxy": proxy_http,
+                                "latency_ms": latency,
+                                "detail": f"IP: {proxy_http} | Nhà mạng: {isp} | Vị trí: {location} ({msg})"
+                            }
+                        else:
+                            err_msg = js.get("message") or js.get("comen") or f"Lỗi status={js.get('status')}"
+                            return {
+                                "success": False,
+                                "proxy": None,
+                                "latency_ms": latency,
+                                "detail": f"[Proxy.vn Lỗi]: {err_msg}"
+                            }
+                    # Các loại API khác
+                    return {
+                        "success": True,
+                        "proxy": str(js),
+                        "latency_ms": latency,
+                        "detail": f"Phản hồi JSON: {str(js)[:100]}"
+                    }
+                except Exception:
+                    return {
+                        "success": True,
+                        "proxy": resp.text.strip()[:50],
+                        "latency_ms": latency,
+                        "detail": resp.text.strip()[:100]
+                    }
+            return {
+                "success": False,
+                "proxy": None,
+                "latency_ms": latency,
+                "detail": f"HTTP Status {resp.status_code}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "proxy": None,
+                "latency_ms": 0,
+                "detail": f"Lỗi kết nối: {e}"
+            }
 
     def create_proxy_auth_extension(self, proxy: ProxyItem) -> Optional[str]:
         """
@@ -210,7 +335,6 @@ chrome.webRequest.onAuthRequired.addListener(
         try:
             item = ProxyItem(proxy_str)
             proxies_dict = item.to_requests_dict()
-            import time
             start = time.time()
             resp = requests.get(
                 "http://httpbin.org/ip",

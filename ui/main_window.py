@@ -293,9 +293,10 @@ class MainWindow(ctk.CTk):
         self.chk_fallback.pack(side="left")
 
     def _build_proxy_tab(self, parent):
+        # 1. Danh sách Proxy tĩnh
         lbl_p = ctk.CTkLabel(
             parent,
-            text="Danh Sách Proxy (Hỗ trợ: ip:port hoặc ip:port:user:pass):",
+            text="Danh Sách Proxy Tĩnh (Mỗi dòng 1 proxy - ip:port hoặc ip:port:user:pass):",
             font=FONTS["body_bold"],
             text_color=THEME["text_primary"]
         )
@@ -307,33 +308,20 @@ class MainWindow(ctk.CTk):
             fg_color=THEME["bg_input"],
             border_width=1,
             border_color=THEME["border_color"],
-            height=160
+            height=120
         )
-        self.txt_proxies.pack(fill="x", padx=10, pady=(0, 8))
+        self.txt_proxies.pack(fill="x", padx=10, pady=(0, 6))
 
-        lbl_api = ctk.CTkLabel(parent, text="Hoặc URL API Xoay IP (TMProxy, Tinsoft...):", font=FONTS["body_bold"], text_color=THEME["text_primary"])
-        lbl_api.pack(anchor="w", padx=10, pady=(4, 2))
-
-        self.entry_proxy_api = ctk.CTkEntry(
-            parent,
-            placeholder_text="https://api.tmproxy.com/api/get-new-proxy?api_key=...",
-            font=FONTS["code"],
-            fg_color=THEME["bg_input"],
-            border_color=THEME["border_color"],
-            height=34
-        )
-        self.entry_proxy_api.pack(fill="x", padx=10, pady=(0, 12))
-
-        # Test proxy button
         btn_row = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_row.pack(fill="x", padx=10, pady=4)
+        btn_row.pack(fill="x", padx=10, pady=(0, 10))
 
         self.btn_test_proxy = ctk.CTkButton(
             btn_row,
-            text="⚡ Kiểm tra Proxy đầu tiên",
-            font=FONTS["body_bold"],
+            text="⚡ Test Proxy tĩnh",
+            font=FONTS["small"],
             fg_color=THEME["border_color"],
             hover_color="#475569",
+            width=130,
             command=self._on_test_proxy_clicked
         )
         self.btn_test_proxy.pack(side="left")
@@ -341,10 +329,59 @@ class MainWindow(ctk.CTk):
         self.lbl_proxy_test_res = ctk.CTkLabel(
             btn_row,
             text="",
-            font=FONTS["body"],
+            font=FONTS["small"],
             text_color=THEME["text_muted"]
         )
-        self.lbl_proxy_test_res.pack(side="left", padx=12)
+        self.lbl_proxy_test_res.pack(side="left", padx=10)
+
+        # 2. API Xoay IP (Proxy.vn)
+        lbl_api = ctk.CTkLabel(
+            parent,
+            text="Hoặc API Xoay IP (Proxy.vn / Proxyxoay.shop / TMProxy...):",
+            font=FONTS["body_bold"],
+            text_color=THEME["text_primary"]
+        )
+        lbl_api.pack(anchor="w", padx=10, pady=(6, 2))
+
+        lbl_hint = ctk.CTkLabel(
+            parent,
+            text="Dán link get API hoặc chỉ cần dán Mã Key xoay của Proxy.vn:",
+            font=FONTS["small"],
+            text_color=THEME["text_muted"]
+        )
+        lbl_hint.pack(anchor="w", padx=10, pady=(0, 2))
+
+        self.entry_proxy_api = ctk.CTkEntry(
+            parent,
+            placeholder_text="VD: https://proxyxoay.shop/api/get.php?key=KEY_XOAY (hoặc dán nguyên KEY)",
+            font=FONTS["code"],
+            fg_color=THEME["bg_input"],
+            border_color=THEME["border_color"],
+            height=34
+        )
+        self.entry_proxy_api.pack(fill="x", padx=10, pady=(0, 6))
+
+        btn_row_api = ctk.CTkFrame(parent, fg_color="transparent")
+        btn_row_api.pack(fill="x", padx=10, pady=(0, 6))
+
+        self.btn_test_api = ctk.CTkButton(
+            btn_row_api,
+            text="🔄 Test API Xoay (Proxy.vn)",
+            font=FONTS["small"],
+            fg_color=THEME["accent_primary"],
+            hover_color=THEME["accent_hover"],
+            width=170,
+            command=self._on_test_api_clicked
+        )
+        self.btn_test_api.pack(side="left")
+
+        self.lbl_api_test_res = ctk.CTkLabel(
+            btn_row_api,
+            text="",
+            font=FONTS["small"],
+            text_color=THEME["text_muted"]
+        )
+        self.lbl_api_test_res.pack(side="left", padx=10)
 
     def _build_settings_tab(self, parent):
         # 1. Số luồng & Số lượt chạy
@@ -642,6 +679,34 @@ class MainWindow(ctk.CTk):
                         text=f"Lỗi: {res['error']}",
                         text_color=THEME["log_error"]
                     )
+            self.after(0, _show)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_test_api_clicked(self):
+        """Kiểm tra gọi API xoay IP Proxy.vn / Proxyxoay.shop"""
+        api_input = self.entry_proxy_api.get().strip()
+        if not api_input:
+            self.lbl_api_test_res.configure(text="Vui lòng nhập Link API hoặc Key xoay Proxy.vn!", text_color=THEME["log_warning"])
+            return
+
+        self.lbl_api_test_res.configure(text="Đang gọi API kiểm tra...", text_color=THEME["text_muted"])
+
+        def _worker():
+            res = ProxyManager.test_api_xoay(api_input)
+            def _show():
+                if res["success"]:
+                    self.lbl_api_test_res.configure(
+                        text=f"Thành công! {res['detail']} ({res['latency_ms']}ms)",
+                        text_color=THEME["log_success"]
+                    )
+                    logger.success(f"[Proxy.vn API] {res['detail']}", "Proxy")
+                else:
+                    self.lbl_api_test_res.configure(
+                        text=f"Lỗi: {res['detail']}",
+                        text_color=THEME["log_error"]
+                    )
+                    logger.error(f"[Proxy.vn API] {res['detail']}", "Proxy")
             self.after(0, _show)
 
         threading.Thread(target=_worker, daemon=True).start()

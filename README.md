@@ -63,9 +63,11 @@ python app.py
 - **Duyệt trang con**: Đặt 1 - 3 trang để tăng lượt xem tự nhiên.
 
 ### 2. Tab "Cấu Hình Proxy"
-- Dán danh sách Proxy vào khung (mỗi dòng 1 proxy).
-- Hoặc nhập link API xoay IP vào ô "URL API Xoay IP".
-- Bấm **"Kiểm tra Proxy đầu tiên"** để xác nhận kết nối trước khi chạy.
+- **Proxy Tĩnh**: Dán danh sách Proxy vào khung (mỗi dòng 1 proxy: `ip:port` hoặc `ip:port:user:pass`).
+- **API Xoay IP (Proxy.vn / Proxyxoay.shop)**:
+  - Bạn chỉ cần dán **Key xoay** (ví dụ: `rwywzSOvFNZOWDVJJBrQRb`) vào ô URL API Xoay IP.
+  - Hoặc dán đầy đủ đường link: `https://proxyxoay.shop/api/get.php?key=KEY_CUA_BAN&nhamang=Random&tinhthanh=0`
+  - Bấm nút **"🔄 Test API Xoay (Proxy.vn)"** để kiểm tra ngay xem Key có hợp lệ và lấy được IP, nhà mạng, vị trí không trước khi khởi chạy chiến dịch!
 
 ### 3. Tab "Cài Đặt Nâng Cao"
 - **Số luồng chạy (Threads)**: Tùy theo cấu hình máy tính (1 - 5 luồng cho máy cá nhân, 5 - 10 luồng cho VPS mạnh).
